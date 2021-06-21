@@ -1,0 +1,434 @@
+---
+output: 
+        bookdown::pdf_document2: 
+                toc: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+```
+
+# Appendix
+
+## Code
+
+```{r}
+#Loading dataset
+stock_dat <- read.csv("data_stock.csv")
+blank_stock <- read.csv("blank_stock.csv")
+
+stock_dat$Date <- stock_dat$Date %>% as.Date()
+blank_stock$Date <- blank_stock$Date %>% as.Date()
+
+stock_dat$t_index <- (1:nrow(stock_dat))
+blank_stock$t_index <- ((nrow(stock_dat)+1) : (nrow(stock_dat)+nrow(blank_stock)))
+```
+
+```{r, fig.height=2.5, fig.width=6}
+#Univariate time series plot of stock prices
+stock_dat %>% ggplot(aes(x=Date, y=Price)) + 
+  geom_path() +
+  theme_classic() +
+  labs(title="Lots-of-stuff Incorporated Daily Stock Prices Over Time", x="Year") + 
+  theme(plot.title = element_text(face='bold', hjust = 0.5)) 
+```
+
+
+```{r, fig.width=10, fig.height=5}
+stock_dat$year <- stock_dat$Date %>% lubridate::year()
+stock_dat$month <- stock_dat$Date %>% lubridate::month()
+stock_dat$day <- stock_dat$Date %>% lubridate::day()
+
+blank_stock$year <- blank_stock$Date %>% lubridate::year()
+blank_stock$month <- blank_stock$Date %>% lubridate::month()
+blank_stock$day <- blank_stock$Date %>% lubridate::day()
+
+#par(mfrow = c(2, 3))
+#stock_dat %>% filter(year == 2016) %>% select(Price) %>% 
+#  plot.ts(main="2016", xlab="Day")
+#stock_dat %>% filter(year == 2017) %>% select(Price) %>% 
+#  plot.ts(main="2017", xlab="Day")
+#stock_dat %>% filter(year == 2018) %>% select(Price) %>%
+#  plot.ts(main="2018", xlab="Day")
+#stock_dat %>% filter(year == 2019) %>% select(Price) %>% 
+#  plot.ts(main="2019", xlab="Day")
+#stock_dat %>% filter(year == 2020) %>% select(Price) %>% 
+#  plot.ts(main="2020", xlab="Day")
+```
+
+
+
+
+```{r}
+stock_dat <- stock_dat %>% mutate(covid_dip = (t_index >= 1054 & t_index <= 1071))
+blank_stock <- blank_stock %>% mutate(covid_dip = (t_index >= 1054 & t_index <= 1071))
+
+stock_dat <- stock_dat %>% mutate(year_end = (month == 12 &
+                                            day >= 20)|(month == 1 & day <= 15))
+blank_stock <- blank_stock %>% mutate(year_end = (month == 12 &
+                                            day >= 20)|(month == 1 & day <= 15))
+
+stock_dat <- stock_dat %>% mutate(summer = (month >= 7 & month <= 9))
+blank_stock <- blank_stock %>% mutate(summer = (month >= 7 & month <= 9))
+
+
+price = stock_dat$Price
+stock_recent <- stock_dat %>% filter(t_index >= 1072)
+recent_price <- stock_recent$Price
+```
+
+
+```{r}
+# Remove trend with First Difference
+price.diff <- diff(price, differences = 1)
+
+
+#Estimate prices using difference formula
+diff.estimates <- NA
+for (i in 2:length(price)) {
+  diff.estimates[i] = mean(price.diff) + price[i-1]
+}
+
+```
+
+```{r, fig.width=10, fig.height=6}
+max_lag=40
+par(mfrow = c(2, 2))
+
+#Stock prices plot with model estimates
+price %>% plot.ts(main = "Differencing Estimates of Price",
+                  xlab="Year",
+                  ylab="Price",
+                  axes=F)
+diff.estimates %>% lines(col=2, lwd=2)
+box()
+axis(2)
+axis(1,at = c(1, 253, 504, 755, 1007, 1260), labels = 2016:2021)
+
+#Residuals plot
+price.diff %>% plot.ts(main = expression(paste(nabla,"Price"[t])),
+                  xlab="Year",
+                  ylab="Price",
+                  axes=F)
+box()
+axis(2)
+axis(1,at = c(1, 253, 504, 755, 1007, 1260), labels = 2016:2021)
+
+
+
+
+# Get first difference acf/pacf values
+diff.acf <- acf(price.diff, ylim=c(-1,1), lag.max=max_lag, plot=F)$acf
+diff.pacf <- pacf(price.diff, ylim=c(-1,1), lag.max = max_lag, plot=F)$acf
+
+#First Noise Model
+diff.auto_arima <- auto.arima(price.diff)
+
+
+est_acf <- stats::ARMAacf(ar=diff.auto_arima$coef[1],
+                          ma=diff.auto_arima$coef[2], 
+                          lag.max = max_lag, pacf=F)
+
+
+est_pacf <- stats::ARMAacf(ar=diff.auto_arima$coef[1], 
+                           ma=diff.auto_arima$coef[2],
+                           lag.max = max_lag, pacf=T)
+
+
+#Second Noise Model
+ar_est <- ar(price.diff) 
+ar.phis <- ar_est$ar
+ma.thetas <- c()
+
+est_acf2 <- stats::ARMAacf(ar=ar.phis, ma=ma.thetas, lag.max = max_lag, pacf=F)
+est_pacf2 <- stats::ARMAacf(ar=ar.phis, ma=ma.thetas, lag.max = max_lag, pacf=T)
+
+
+###
+L = 1.96/sqrt(length(price.diff))
+
+plot(1:max_lag, diff.acf,
+     xlab = "Lag",
+     ylab = "ACF",
+     type = "h", 
+     ylim = c(min(diff.acf), max(diff.acf)),
+     main = "ACF of First Differences")
+abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c('black','steelblue2', 'steelblue2'))
+points((1:max_lag), est_acf[-1], col = 2, cex=1.3)
+points((1:max_lag), est_acf2[-1], col = 'blue1', cex=1)
+
+
+plot(1:max_lag, diff.pacf,
+     xlab = "Lag",
+     ylab = "PACF",
+     type = "h", 
+     ylim = c(min(diff.pacf), max(diff.pacf)),
+     main = "PACF of First Differences")
+abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c('black','steelblue2', 'steelblue2'))
+points((1:max_lag), est_pacf, col = 2, cex=1.3)
+points((1:max_lag), est_pacf2, col = 'blue1', cex=1)
+```
+
+
+```{r, fig.height=2.5, fig.width=10, warning=F, message=F}
+test = arima(price.diff, order=c(1,0,1))
+test2 = arima(price.diff, order=c(9,0,0))
+
+par(mfrow = c(1, 2))
+#Arma(1,1)
+lags = (1:10)
+pvalues = NA
+for (i in lags) {
+  result =Box.test(test$residuals, lag=i, type="Ljung-Box")
+  pvalues[i] = result$p.value
+  
+}
+plot(lags, pvalues,
+     xlab = "Lag",
+     ylab = "p-value",
+     type = "p", 
+     col = 'red',
+     pch = 16,
+     ylim = c(0, 1),
+     main = "ARMA(1,1) Ljung-Box p-values")
+abline(h = 0, lty = 2, col = 'black')
+
+#Arma(9,0)
+lags = (1:10)
+pvalues = NA
+for (i in lags) {
+  result =Box.test(test2$residuals, lag=i, type="Ljung-Box")
+  pvalues[i] = result$p.value
+  
+}
+plot(lags, pvalues,
+     xlab = "Lag",
+     ylab = "p-value",
+     type = "p", 
+     col = 'red',
+     pch = 16,
+     ylim = c(0, 1),
+     main = "ARMA(9,0) Ljung-Box p-values")
+abline(h = 0, lty = 2, col = 'black')
+
+```
+
+
+
+$$
+\begin{aligned}
+\hat{Price_t} = \left( \frac{(1-\alpha)}{\alpha} \sum^{15}_ {i=1} \alpha^i Price_{t-i} \right)  + X_t
+\end{aligned}
+$$
+
+
+```{r, fig.height=3.5, fig.width=10}
+w = 0.67 ; w.lags = 15
+price = (price)
+exp.weights =  (w^(1:w.lags)) 
+exp.weights = exp.weights/sum(exp.weights) 
+exp_smooth = stats::filter(price, sides = 1, filter=c(0,exp.weights))
+exp_residual = (price - exp_smooth) %>% na.omit()
+
+
+par(mfrow = c(1, 2))
+
+#Stock prices plot with smoothing estimates
+price %>% plot.ts(main = "Exponential Smoothing",
+                  xlab="Year",
+                  ylab="Price",
+                  axes=F)
+exp_smooth %>% lines(col=4, lwd=2)
+box()
+axis(2)
+#axis(1,at = c(1, 190), labels = 2020:2021)
+axis(1,at = c(1, 253, 504, 755, 1007, 1260), labels = 2016:2021)
+
+#Residuals plot
+exp_residual %>% plot.ts(main = "Residuals",
+                  xlab="Year",
+                  ylab="Price",
+                  axes=F)
+box()
+axis(2)
+#axis(1,at = c(1, 190), labels = 2020:2021)
+axis(1,at = c(1, 253, 504, 755, 1007, 1260), labels = 2016:2021)
+```
+
+
+
+```{r, fig.height=3.5, fig.width=10}
+max_lag=50
+
+test = ar(exp_residual)
+
+
+#Get exponential model residual acf/pacf values
+exp_residual.acf <- acf(exp_residual, ylim=c(-1,1), lag.max=max_lag, plot=F)$acf
+exp_residual.pacf <- pacf(exp_residual, ylim=c(-1,1), lag.max = max_lag, plot=F)$acf
+
+#AR based on observations
+ar.phis <- test$ar
+ar1_acf <- stats::ARMAacf(ar=ar.phis,lag.max = max_lag, pacf=F)
+ar1_pacf <- stats::ARMAacf(ar=ar.phis, lag.max = max_lag, pacf=T)
+
+
+#Auto Arima suggestion
+exp_res.auto_arma <- auto.arima(exp_residual)
+
+ar.phis <- c(0.5050) ; ma.thetas <- c(-0.0824, 0.1664)
+auto_arma_acf <- stats::ARMAacf(ar=ar.phis, ma=ma.thetas, lag.max = max_lag, pacf=F)
+auto_arma_pacf <- stats::ARMAacf(ar=ar.phis, ma=ma.thetas, lag.max = max_lag, pacf=T)
+
+
+L = 1.96/sqrt(length(exp_residual))
+
+par(mfrow = c(1, 2))
+#Exponential Smoothing Residual ACF plot
+plot(1:max_lag, exp_residual.acf,
+     xlab = "Lag",
+     ylab = "ACF",
+     type = "h", 
+     ylim = c(min(exp_residual.acf), max(exp_residual.acf)),
+     main = "ACF of Residuals")
+abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c('black','blue', 'blue'))
+points((1:max_lag), ar1_acf[-1], col = 'springgreen4', cex=1.2)
+points((1:max_lag), auto_arma_acf[-1],pch=1,  col = 2, cex=1.1)
+
+#Exponential Smoothing Residual PACF plot
+plot(1:max_lag, exp_residual.pacf,
+     xlab = "Lag",
+     ylab = "PACF",
+     type = "h", 
+     ylim = c(min(exp_residual.pacf), max(exp_residual.pacf)),
+     main = "PACF of Residuals")
+abline(h = c(0, -L, L), lty = c(1, 2, 2), col = c('black','blue', 'blue'))
+points((1:max_lag), ar1_pacf, col = 'springgreen4', cex=1.2)
+points((1:max_lag), auto_arma_pacf, pch=1, col = 2, cex=1.1)
+```
+
+
+
+```{r,warning=FALSE, message=FALSE, error=FALSE, results='hide', fig.show='hide'}
+n = length(price)
+mid_point <- as.integer(n*0.1)*5
+cut_offs = seq(from = 1000, to = 1250, by=10)
+
+#ARIMA(1,1,1) cross validation
+mse_sum = 0
+for (i in cut_offs) {
+  preds = sarima.for(price[1:i] , n.ahead=10,
+                     p=1,d=1,q=1,D=0,Q=0, plot=F)
+  
+  mse_sum = mse_sum + mean((price[(i+1):(i+10)] - preds$pred)^2)
+}
+root_mses[1] = sqrt(mse_sum/length(cut_offs)) 
+
+#ARIMA(9,1,0) cross validation
+mse_sum = 0
+for (i in cut_offs) {
+  preds = sarima.for(price[1:i] , n.ahead=10,
+                     p=9,d=1,q=0,D=0,Q=0, plot=F)
+  
+  mse_sum = mse_sum + mean((price[(i+1):(i+10)] - preds$pred)^2)
+}
+root_mses[2] = sqrt(mse_sum/length(cut_offs)) 
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, error=FALSE, results='hide', fig.show='hide'}
+#Exponential Filter predictor
+filter_pred <- function(data, weights, noise_forecasts, forecasts_num) {
+  data_w_forecasts = c(data, rep(NA, forecasts_num))
+  n = length(data)
+  m = length(weights)
+  for (i in 1:forecasts_num) {
+    data_w_forecasts[n+i] = weights%*%data_w_forecasts[(n+i-1):(n+i-m)] + 
+      noise_forecasts$pred[i]
+  }
+  return(data_w_forecasts[(n+1):(n+forecasts_num)])
+}
+
+
+n = length(price)
+mid_point <- as.integer(n*0.1)*5
+cut_offs = seq(from = 1000, to = 1250, by=10)
+
+
+#Exponential Smoothing with ARMA(1,2)
+mse_sum = 0
+for (i in cut_offs) {
+  prices = price[1:i]
+  smooth = stats::filter(prices, sides = 1, filter=c(0,exp.weights))
+  residual = (prices - smooth) %>% na.omit()
+
+  noise_preds = sarima.for(residual, n.ahead = 10,
+                               p=1,d=0,q=2,P=0,D=0,Q=0, plot = F)
+  
+  mse_sum = mse_sum + mean((price[(i+1):(i+10)] -  filter_pred(prices,
+                                                       exp.weights, 
+                                                       noise_preds, 10))^2)
+}
+
+root_mses[3] = sqrt(mse_sum/length(cut_offs))
+
+
+
+
+#Exponential Smoothing with AR(10)
+mse_sum = 0
+for (i in cut_offs) {
+  prices = price[1:i]
+  smooth = stats::filter(prices, sides = 1, filter=c(0,exp.weights))
+  residual = (prices - smooth) %>% na.omit()
+
+  noise_preds = sarima.for(residual, n.ahead = 10,
+                               p=10,d=0,q=0,P=0,D=0,Q=0, plot = F)
+  
+  mse_sum = mse_sum + mean((price[(i+1):(i+10)] -  filter_pred(prices,
+                                                       exp.weights, 
+                                                       noise_preds, 10))^2)
+}
+
+root_mses[4] = sqrt(mse_sum/length(cut_offs)) 
+
+```
+
+
+
+```{r rmsetable, eval=F}
+#RMSE table
+rmse = matrix(root_mses, nrow=4,ncol = 1)
+colnames(rmse) = "RMSPE"
+rownames(rmse) = c(
+        "ARIMA(1,1,1)  ",
+        "ARIMA(9,1,0)",
+        "Exponential Filter + ARMA(1,2) ",
+        "Exponential Filter + AR(10)"
+        )
+knitr::kable(rmse,caption = "Cross-validated out-of-sample root mean squared prediction error for the four models under consideration.")
+```
+
+
+```{r, fig.height=4, fig.width=10, fig.align='center'}
+par(oma=c(0,0,2,0))
+attempt = sarima.for(price, n.ahead=10, p=1,d=1,q=1,S=0,P=0,Q=0)$pred
+axis(3,at = c(1160, 1180, 1200, 1220, 1240, 1260), labels = c("Aug-2020", "Sep-2020", "Oct-2020", "Nov-2020", "Dec-2020", "Jan-2021"))
+```
+
+
+```{r, fig.height=3.5, fig.width=10}
+data_w_forecasts = c(exp_smooth, rep(NA, 10))
+n = length(exp_smooth)
+m = length(exp.weights)
+for (i in 1:10) {
+    data_w_forecasts[n+i] = exp.weights%*%data_w_forecasts[(n+i-1):(n+i-m)]
+  }
+
+#par(oma=c(0,0,2,0))
+#attempt = sarima.for(price, n.ahead=10, p=1,d=0,q=2,S=0,P=0,Q=0, xreg = exp_smooth, newxreg = data_w_forecasts[(n+1):(n+10)])$pred
+#axis(3,at = c(1160, 1180, 1200, 1220, 1240, 1260), labels = c("Aug-2020", "Sep-2020", "Oct-2020", "Nov-2020", "Dec-2020", "Jan-2021"))
+
+```
+
+
